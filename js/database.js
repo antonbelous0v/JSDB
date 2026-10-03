@@ -1,335 +1,84 @@
-import { BufferPool } from "./storage/buffer_pool.js"
-import { Pager } from "./storage/pager.js"
-import { Page } from "./storage/page.js"
-import { WriteAheadLog } from "./wal/wal.js"
-import { Recovery } from "./wal/recovery.js"
-import { LockTable } from "./transaction/lock_table.js"
-import { TransactionManager } from "./transaction/transaction.js"
-import { Catalog } from "./catalog/catalog.js"
-import { Column, TableSchema } from "./catalog/schema.js"
-import { Table } from "./catalog/table.js"
 import { Parser } from "./sql/parser.js"
 import { FixedCache } from "./sql/fixed_cache.js"
 import { Binder } from "./sql/binder.js"
-import { LogicalPlanner } from "./planner/logical.js"
-import { PhysicalPlanner } from "./planner/physical.js"
-import { Executor } from "./executor/executor.js"
-import { evaluate } from "./executor/expression.js"
-import { explain } from "./planner/explain.js"
-import { DataType, TransactionState, WalType } from "./constants.js"
+import { openDatabaseResources } from "./database_factory.js"
+import { TableRegistry } from "./table_registry.js"
+import { SchemaExecutor } from "./execution/schema_executor.js"
+import { MutationExecutor } from "./execution/mutation_executor.js"
+import { QueryExecutor } from "./execution/query_executor.js"
+import { StatementExecutor } from "./execution/statement_executor.js"
+import { CommitCoordinator } from "./transaction/commit_coordinator.js"
+import { TransactionSession } from "./transaction/session.js"
 
 export class Database {
-  constructor(host, path, pager, wal, bufferPool, transactions, catalog) {
-    this.host = host
-    this.path = path
-    this.pager = pager
-    this.wal = wal
-    this.bufferPool = bufferPool
-    this.transactions = transactions
-    this.catalog = catalog
-    this.tables = new Map()
-    this.currentTransaction = null
-    this.queriesExecuted = 0
+  constructor(resources) {
+    Object.assign(this, resources)
     this.queryCache = new FixedCache(256)
+    this.tableRegistry = new TableRegistry(this.catalog, this.bufferPool, this.transactions)
+    this.tables = this.tableRegistry.tables
+    this.commitCoordinator = new CommitCoordinator(this.host, this.pager, this.wal, this.bufferPool, this.transactions, this.catalog)
+    this.session = this.createSession()
+    const schema = new SchemaExecutor(this.catalog, this.tableRegistry, this.queryCache)
+    const mutations = new MutationExecutor(this.catalog, this.tableRegistry)
+    const queries = new QueryExecutor(this.catalog, this.tableRegistry)
+    this.statements = new StatementExecutor(schema, mutations, queries)
+    this.queriesExecuted = 0
   }
 
   static open(path, host = Host) {
-    const pager = Pager.open(host, path)
-    const wal = WriteAheadLog.open(host, `${path}.wal`)
-    new Recovery(wal, {
-      redo(record) {
-        if (record.type !== WalType.PAGE_WRITE) {
-          return
-        }
-        let current = null
-        try {
-          current = pager.read(record.pageId)
-        } catch {}
-        if (!current || current.pageLSN < record.lsn) {
-          pager.write(Page.decode(new Uint8Array(record.payload), record.pageId))
-        }
-      },
-      undo() {},
-    }).run(pager.header.checkpointLSN)
-    pager.sync()
-    pager.reloadHeader()
-    const bufferPool = new BufferPool(pager, 128, lsn => wal.sync(lsn))
-    const transactions = new TransactionManager(wal, new LockTable())
-    transactions.restore(wal.records())
-    const catalog = Catalog.load(bufferPool, pager.header.catalogRoot)
-    return new Database(host, path, pager, wal, bufferPool, transactions, catalog)
+    return new Database(openDatabaseResources(path, host))
+  }
+
+  get currentTransaction() {
+    return this.session.current
+  }
+
+  createSession() {
+    return new TransactionSession(this.transactions, this.commitCoordinator, this.queryCache, this.tableRegistry)
   }
 
   table(name) {
-    let table = this.tables.get(name)
-    if (!table) {
-      table = new Table(this.catalog.getTable(name), this.bufferPool, this.transactions, this)
-      this.tables.set(name, table)
-    }
-    return table
+    return this.tableRegistry.table(name)
   }
 
-  assertDeleteAllowed(tableName, row, transaction) {
-    const referenced = this.catalog.getTable(tableName)
-    for (const metadata of this.catalog.tables.values()) {
-      for (let index = 0; index < metadata.schema.columns.length; index += 1) {
-        const column = metadata.schema.columns[index]
-        if (!column.references || column.references.table !== tableName) {
-          continue
-        }
-        const targetIndex = referenced.schema.indexOf(column.references.column)
-        for (const candidate of this.table(metadata.schema.name).scan(transaction)) {
-          if (candidate.row[index] === row[targetIndex]) {
-            throw new Error(`Delete restricted by ${metadata.schema.name}.${column.name}`)
-          }
-        }
-      }
-    }
-  }
-
-  execute(sql) {
+  execute(sql, session = this.session) {
     const cached = this.queryCache.get(sql)
     if (cached) {
-      return this.executeStatement(cached, true)
+      return this.executeStatement(cached, true, session)
     }
     const results = []
     const statements = new Parser(sql).parse()
     if (statements.length === 1 && statements[0].type === "select") {
       const bound = new Binder(this.catalog).bind(statements[0])
       this.queryCache.set(sql, bound)
-      return this.executeStatement(bound, true)
+      return this.executeStatement(bound, true, session)
     }
     for (const statement of statements) {
-      results[results.length] = this.executeStatement(statement)
+      results[results.length] = this.executeStatement(statement, false, session)
     }
     return results.length === 1 ? results[0] : results
   }
 
-  executeStatement(statement, isBound = false) {
+  executeStatement(statement, isBound = false, session = this.session) {
     this.queriesExecuted += 1
     const bound = isBound ? statement : new Binder(this.catalog).bind(statement)
-    if (bound.type === "begin") {
-      return this.begin()
-    }
-    if (bound.type === "commit") {
-      return this.commit()
-    }
-    if (bound.type === "rollback") {
-      return this.rollback()
-    }
-    const owned = !this.currentTransaction
-    const transaction = this.currentTransaction ?? this.transactions.begin(bound.type === "select" || bound.type === "explain")
-    try {
-      const result = this.run(bound, transaction)
-      if (owned) {
-        this.commitTransaction(transaction)
-      }
-      return result
-    } catch (error) {
-      if (owned && transaction.state === TransactionState.ACTIVE) {
-        this.transactions.rollback(transaction)
-        this.queryCache.clear()
-        this.tables.clear()
-      }
-      throw error
-    }
-  }
-
-  run(statement, transaction) {
-    if (statement.type === "create_table") {
-      return this.createTable(statement, transaction)
-    }
-    if (statement.type === "drop_table") {
-      return this.dropTable(statement, transaction)
-    }
-    if (statement.type === "create_index") {
-      return this.createIndex(statement, transaction)
-    }
-    if (statement.type === "drop_index") {
-      return this.dropIndex(statement, transaction)
-    }
-    if (statement.type === "insert") {
-      return this.insert(statement, transaction)
-    }
-    if (statement.type === "update") {
-      return this.update(statement, transaction)
-    }
-    if (statement.type === "delete") {
-      return this.delete(statement, transaction)
-    }
-    if (statement.type === "select") {
-      return this.select(statement, transaction)
-    }
-    if (statement.type === "explain") {
-      return this.explain(statement.statement)
-    }
-    throw new Error(`Unsupported statement ${statement.type}`)
+    return session.execute(bound, transaction => this.statements.execute(bound, transaction))
   }
 
   begin() {
-    if (this.currentTransaction) {
-      throw new Error("Transaction already active")
-    }
-    this.currentTransaction = this.transactions.begin()
-    return { status: "BEGIN" }
+    return this.session.begin()
   }
 
   commit() {
-    if (!this.currentTransaction) {
-      throw new Error("No active transaction")
-    }
-    this.commitTransaction(this.currentTransaction)
-    this.currentTransaction = null
-    return { status: "COMMIT" }
+    return this.session.commit()
   }
 
   rollback() {
-    if (!this.currentTransaction) {
-      throw new Error("No active transaction")
-    }
-    this.transactions.rollback(this.currentTransaction)
-    this.currentTransaction = null
-    this.queryCache.clear()
-    this.tables.clear()
-    return { status: "ROLLBACK" }
-  }
-
-  commitTransaction(transaction) {
-    if (transaction.readOnly) {
-      this.transactions.commit(transaction)
-      return
-    }
-    const headerChanged = this.catalog.persist()
-    const pages = this.bufferPool.dirtyPages()
-    if (headerChanged) {
-      pages[pages.length] = this.pager.headerPage()
-    }
-    for (const page of pages) {
-      page.pageLSN = this.wal.nextLSN
-      page.seal()
-      this.wal.append(transaction.id, WalType.PAGE_WRITE, page.id, new Uint8Array(page.bytes))
-    }
-    this.transactions.commit(transaction)
-    this.host.debug.crashPoint("after-commit-before-page-flush")
-    for (const page of pages) {
-      this.pager.write(page)
-    }
-    this.pager.sync()
-  }
-
-  createTable(statement, transaction) {
-    this.queryCache.clear()
-    const schema = new TableSchema({ name: statement.name, columns: statement.columns.map(column => new Column({ name: column.name, type: column.dataType, nullable: column.nullable, references: column.references })), primaryKey: statement.primaryKey, unique: statement.unique })
-    const table = this.catalog.createTable(schema)
-    for (const columns of schema.unique) {
-      table.indexes[table.indexes.length] = { name: `${schema.name}_${columns.join("_")}_key`, columns, unique: true }
-    }
-    transaction.addUndo(() => {
-      this.catalog.dropTable(schema.name)
-      this.tables.delete(schema.name)
-    })
-    return { status: "CREATE TABLE", table: table.schema.name }
-  }
-
-  dropTable(statement, transaction) {
-    this.queryCache.clear()
-    const metadata = this.catalog.getTable(statement.name)
-    this.catalog.dropTable(statement.name)
-    this.tables.delete(statement.name)
-    transaction.addUndo(() => this.catalog.tables.set(statement.name, metadata))
-    return { status: "DROP TABLE" }
-  }
-
-  createIndex(statement, transaction) {
-    this.queryCache.clear()
-    this.catalog.addIndex(statement.table, statement)
-    this.tables.delete(statement.table)
-    transaction.addUndo(() => {
-      this.catalog.dropIndex(statement.name)
-      this.tables.delete(statement.table)
-    })
-    return { status: "CREATE INDEX" }
-  }
-
-  dropIndex(statement, transaction) {
-    this.queryCache.clear()
-    let owner
-    for (const table of this.catalog.tables.values()) {
-      for (let index = 0; index < table.indexes.length; index += 1) {
-        if (table.indexes[index].name === statement.name) {
-          owner = table
-          break
-        }
-      }
-      if (owner) {
-        break
-      }
-    }
-    const definition = owner?.indexes.find(index => index.name === statement.name)
-    this.catalog.dropIndex(statement.name)
-    this.tables.delete(owner.schema.name)
-    transaction.addUndo(() => {
-      owner.indexes[owner.indexes.length] = definition
-    })
-    return { status: "DROP INDEX" }
-  }
-
-  insert(statement, transaction) {
-    const table = this.table(statement.table)
-    const columns = statement.columns ?? table.schema.columns.map(column => column.name)
-    for (const values of statement.values) {
-      const input = Object.fromEntries(columns.map((column, index) => {
-        const definition = table.schema.columns[table.schema.indexOf(column)]
-        const value = evaluate(values[index], {})
-        return [column, value === null ? null : definition.type === DataType.INT32 || definition.type === DataType.FLOAT64 ? Number(value) : definition.type === DataType.INT64 || definition.type === DataType.TIMESTAMP ? BigInt(value) : value]
-      }))
-      table.insert(input, transaction)
-    }
-    this.catalog.markDirty()
-    return { status: "INSERT", rows: statement.values.length }
-  }
-
-  update(statement, transaction) {
-    const table = this.table(statement.table)
-    const predicate = row => !statement.where || evaluate(statement.where, { [statement.table]: row }) === true
-    const changes = Object.fromEntries(statement.assignments.map(assignment => [assignment.column, (_, input) => {
-      const column = table.schema.columns[table.schema.indexOf(assignment.column)]
-      const value = evaluate(assignment.value, { [statement.table]: table.schema.columns.map(definition => input[definition.name]) })
-      return value === null ? null : column.type === DataType.INT32 || column.type === DataType.FLOAT64 ? Number(value) : column.type === DataType.INT64 || column.type === DataType.TIMESTAMP ? BigInt(value) : value
-    }]))
-    const rows = table.updateWhere(predicate, changes, transaction)
-    if (rows) {
-      this.catalog.markDirty()
-    }
-    return { status: "UPDATE", rows }
-  }
-
-  delete(statement, transaction) {
-    const table = this.table(statement.table)
-    const predicate = row => !statement.where || evaluate(statement.where, { [statement.table]: row }) === true
-    return { status: "DELETE", rows: table.deleteWhere(predicate, transaction) }
-  }
-
-  select(statement, transaction) {
-    const physical = this.plan(statement)
-    return new Executor(name => this.table(name), transaction).execute(physical)
-  }
-
-  explain(statement) {
-    return explain(this.plan(statement))
-  }
-
-  plan(statement) {
-    const bound = statement.references ? statement : new Binder(this.catalog).bind(statement)
-    return new PhysicalPlanner().plan(new LogicalPlanner().plan(bound))
+    return this.session.rollback()
   }
 
   checkpoint() {
-    this.bufferPool.flushAll()
-    const lsn = this.wal.append(0n, WalType.CHECKPOINT, 0xffffffff, new Uint8Array())
-    this.wal.sync(lsn)
-    this.pager.header.checkpointLSN = lsn
-    this.pager.persistHeader()
+    this.commitCoordinator.checkpoint()
   }
 
   stats() {

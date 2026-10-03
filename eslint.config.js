@@ -2,12 +2,12 @@ import stylistic from "@stylistic/eslint-plugin"
 
 export default [
   {
-    files: ["js/**/*.js", "tests/**/*.js", "benchmarks/**/*.js", "fuzz/**/*.js"],
+    files: ["js/**/*.js", "ui/**/*.js", "tests/**/*.js", "benchmarks/**/*.js", "fuzz/**/*.js"],
     plugins: { "@stylistic": stylistic },
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
-      globals: { Host: "readonly" }
+      globals: { Host: "readonly", document: "readonly", window: "readonly", fetch: "readonly" }
     },
     rules: {
       ...stylistic.configs.customize({ semi: false, indent: 2, quotes: "double", jsx: false }).rules,

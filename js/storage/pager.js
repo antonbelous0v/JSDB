@@ -18,25 +18,36 @@ export class Pager {
     const flags = host.fs.O_RDWR | host.fs.O_CREAT
     const existed = host.fs.exists(path)
     const fd = host.fs.open(path, flags)
-    if (!existed || host.fs.size(fd) === 0) {
-      const header = new DatabaseHeader({ databaseId: host.time.unixNs() })
-      const pager = new Pager(host, path, fd, header)
-      const meta = Page.create(0, PageType.META)
-      header.encode(meta.bytes.subarray(40, 40 + DATABASE_HEADER_SIZE))
-      meta.seal()
-      pager.write(meta)
-      host.fs.fsync(fd)
-      return pager
+    try {
+      host.fs.lockExclusive(fd)
+    } catch (error) {
+      host.fs.close(fd)
+      throw new Error(`Database is already open by another process: ${path}`, { cause: error })
     }
-    if (host.fs.size(fd) % PAGE_SIZE !== 0) {
-      throw new CorruptionError("Database file is not page aligned")
+    try {
+      if (!existed || host.fs.size(fd) === 0) {
+        const header = new DatabaseHeader({ databaseId: host.time.unixNs() })
+        const pager = new Pager(host, path, fd, header)
+        const meta = Page.create(0, PageType.META)
+        header.encode(meta.bytes.subarray(40, 40 + DATABASE_HEADER_SIZE))
+        meta.seal()
+        pager.write(meta)
+        host.fs.fsync(fd)
+        return pager
+      }
+      if (host.fs.size(fd) % PAGE_SIZE !== 0) {
+        throw new CorruptionError("Database file is not page aligned")
+      }
+      const bytes = new Uint8Array(PAGE_SIZE)
+      if (host.fs.pread(fd, bytes, 0, PAGE_SIZE, 0) !== PAGE_SIZE) {
+        throw new CorruptionError("Cannot read database header")
+      }
+      const page = Page.decode(bytes, 0)
+      return new Pager(host, path, fd, DatabaseHeader.decode(page.bytes.subarray(40, 40 + DATABASE_HEADER_SIZE)))
+    } catch (error) {
+      host.fs.close(fd)
+      throw error
     }
-    const bytes = new Uint8Array(PAGE_SIZE)
-    if (host.fs.pread(fd, bytes, 0, PAGE_SIZE, 0) !== PAGE_SIZE) {
-      throw new CorruptionError("Cannot read database header")
-    }
-    const page = Page.decode(bytes, 0)
-    return new Pager(host, path, fd, DatabaseHeader.decode(page.bytes.subarray(40, 40 + DATABASE_HEADER_SIZE)))
   }
 
   read(pageId) {

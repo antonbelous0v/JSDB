@@ -9,6 +9,7 @@ namespace mydb {
 
 void install_fs(v8::Isolate* isolate, v8::Local<v8::Object> host);
 void install_memory(v8::Isolate* isolate, v8::Local<v8::Object> host);
+void install_net(v8::Isolate* isolate, v8::Local<v8::Object> host);
 void install_runtime(v8::Isolate* isolate, v8::Local<v8::Object> host);
 void install_time(v8::Isolate* isolate, v8::Local<v8::Object> host);
 void install_process(v8::Isolate* isolate, v8::Local<v8::Object> host, const std::vector<std::string>& arguments);

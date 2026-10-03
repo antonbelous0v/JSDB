@@ -13,6 +13,7 @@ export function createHost() {
         descriptors.add(fd)
         return fd
       },
+      lockExclusive() {},
       close(fd) {
         if (descriptors.delete(fd)) {
           fs.closeSync(fd)

@@ -18,6 +18,7 @@ add_executable(mydb
     runtime/module_loader.cpp
     runtime/bindings/fs.cpp
     runtime/bindings/memory.cpp
+    runtime/bindings/net.cpp
     runtime/bindings/runtime.cpp
     runtime/bindings/time.cpp
     runtime/bindings/process.cpp
@@ -43,4 +44,13 @@ else()
 endif()
 find_package(Threads REQUIRED)
 target_link_libraries(mydb PRIVATE Threads::Threads "${CMAKE_DL_LIBS}")
+if(WIN32)
+    target_link_libraries(mydb PRIVATE ws2_32)
+endif()
 target_compile_definitions(mydb PRIVATE MYDB_JS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/js")
+file(GLOB_RECURSE MYDB_JS_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/js/*.js")
+add_custom_target(mydb_js ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/js" "$<TARGET_FILE_DIR:mydb>/js"
+    DEPENDS ${MYDB_JS_FILES}
+)
+add_dependencies(mydb mydb_js)

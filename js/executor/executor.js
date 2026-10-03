@@ -33,12 +33,12 @@ export class Executor {
     }
     if (plan.kind === "Limit") {
       const count = Number(evaluate(plan.limit, {}))
-      const input = plan.input
-      if (input.kind === "Project" && input.input.kind === "Filter" && input.input.input.kind === "SeqScan") {
-        const scan = input.input.input
-        return project(limitedSequenceScan(this.resolveTable(scan.reference.name), scan.reference, this.transaction, input.input.condition, count), input.columns)
-      }
-      return limit(this.execute(input), count)
+      return limit(this.execute(plan.input), count)
+    }
+    if (plan.kind === "LimitedSeqScanProject") {
+      const count = Number(evaluate(plan.limit, {}))
+      const rows = limitedSequenceScan(this.resolveTable(plan.reference.name), plan.reference, this.transaction, plan.condition, count)
+      return project(rows, plan.columns)
     }
     throw new Error(`Unknown physical operator ${plan.kind}`)
   }

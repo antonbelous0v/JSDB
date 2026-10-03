@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <windows.h>
 #else
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -60,6 +61,18 @@ std::int64_t system_size(int fd) { struct stat status {}; return ::fstat(fd, &st
 int system_unlink(const char* path) { return ::unlink(path); }
 #endif
 
+int system_lock_exclusive(int fd) {
+#if defined(_WIN32)
+    OVERLAPPED operation {};
+    auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(fd));
+    if (LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, &operation)) return 0;
+    errno = EACCES;
+    return -1;
+#else
+    return ::flock(fd, LOCK_EX | LOCK_NB);
+#endif
+}
+
 std::string text(v8::Isolate* isolate, v8::Local<v8::Value> value) {
     v8::String::Utf8Value result(isolate, value);
     return *result ? *result : "";
@@ -85,6 +98,10 @@ void open_file(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 void close_file(const v8::FunctionCallbackInfo<v8::Value>& info) {
     if (system_close(info[0].As<v8::Int32>()->Value()) < 0) fail(info.GetIsolate(), "close");
+}
+
+void lock_file_exclusive(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    if (system_lock_exclusive(info[0].As<v8::Int32>()->Value()) < 0) fail(info.GetIsolate(), "lock");
 }
 
 void pread_file(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -155,6 +172,7 @@ void install_fs(v8::Isolate* isolate, v8::Local<v8::Object> host) {
     auto fs = v8::Object::New(isolate);
     method(isolate, fs, "open", open_file);
     method(isolate, fs, "close", close_file);
+    method(isolate, fs, "lockExclusive", lock_file_exclusive);
     method(isolate, fs, "pread", pread_file);
     method(isolate, fs, "pwrite", pwrite_file);
     method(isolate, fs, "fsync", sync_file);

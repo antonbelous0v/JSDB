@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyDB (JSDB)</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <span id="status">Ready</span>
+  </header>
+
+  <main>
+    <aside>
+      <div class="sidebar-head">
+        <span class="sidebar-title">Tables</span>
+        <button id="new-table" class="icon-btn" title="New table">＋</button>
+      </div>
+      <nav id="schema"></nav>
+    </aside>
+
+    <section class="content">
+      <nav class="tabs">
+        <button id="tab-data" class="tab active">Browse Data</button>
+        <button id="tab-sql" class="tab">Execute SQL</button>
+      </nav>
+
+      <section id="panel-data" class="panel active">
+        <div class="toolbar">
+          <span id="data-table-name" class="table-title">No table selected</span>
+          <span id="data-rows" class="meta"></span>
+          <span class="spacer"></span>
+          <button id="new-record" class="btn ghost" disabled>New Record</button>
+          <button id="delete-record" class="btn ghost" disabled>Delete Record</button>
+          <button id="revert" class="btn ghost" disabled>Revert</button>
+          <button id="apply" class="btn primary" disabled>Apply Changes</button>
+        </div>
+        <div id="data-grid" class="grid-wrap"></div>
+      </section>
+
+      <section id="panel-sql" class="panel">
+        <div class="toolbar">
+          <span class="table-title">SQL</span>
+          <span class="hint">⌘ / Ctrl + Enter</span>
+          <span class="spacer"></span>
+          <button id="execute" class="btn primary">Execute</button>
+        </div>
+        <textarea id="editor" spellcheck="false">SELECT * FROM accounts ORDER BY id;</textarea>
+        <div id="sql-result" class="result-wrap"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="modal-root"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

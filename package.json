@@ -5,8 +5,9 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "check": "node --check js/bootstrap.js",
-    "lint": "eslint js tests benchmarks fuzz",
-    "lint:fix": "eslint js tests benchmarks fuzz --fix",
+    "lint": "eslint js ui tests benchmarks fuzz",
+    "lint:fix": "eslint js ui tests benchmarks fuzz --fix",
+    "ui": "node ui/server.js",
     "benchmark:btree": "node benchmarks/btree.js",
     "benchmark:database": "node benchmarks/database.js",
     "benchmark:suite": "node benchmarks/suite.js",

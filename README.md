@@ -45,6 +45,10 @@ It is not trying to beat PostgreSQL or SQLite. I just wanted to build the intere
 - Sequential scans and index scans
 - `EXPLAIN`
 - Interactive shell, metrics, page inspection, and WAL inspection
+- Multi-client TCP server with isolated transaction sessions
+- Versioned binary protocol with typed row metadata
+- Exclusive database-file locking across processes
+- Local web UI with SSH port-forwarding support
 - Fault injection points, fuzz targets, and benchmarks
 
 The project implements the core machinery needed for ACID behavior:
@@ -53,8 +57,6 @@ The project implements the core machinery needed for ACID behavior:
 - Consistency through schema validation, relational constraints, page invariants, and checksums.
 - Isolation through transaction snapshots, MVCC visibility rules, and write-conflict detection.
 - Durability through write-ahead logging, `fsync`, page LSNs, checkpoints, and persistent storage.
-
-It is still a minimal database and deliberately has a smaller scope than a production system. There is no network server, authentication, replication, distributed transaction support, parallel query execution, or full ARIES implementation.
 
 ## Requirements
 
@@ -167,7 +169,31 @@ Exit the shell with:
 .quit
 ```
 
-Open the same file again to check that the data is still there:
+## Server and UI
+
+![MyDB UI preview](resources/image.png)
+
+Start the database server:
+
+```bash
+./build/mydb accounts.db --server 127.0.0.1:7432
+```
+
+Start the UI in another terminal:
+
+```bash
+npm run ui -- --db-host 127.0.0.1 --db-port 7432
+```
+
+Then open `http://127.0.0.1:8080`.
+
+For a database server running on another machine:
+
+```bash
+npm run ui -- --ssh user@example.com --remote-port 7432
+```
+
+After stopping the database server, open the same file with the embedded shell to check that the data is still there:
 
 ```bash
 ./build/mydb accounts.db --shell
@@ -185,6 +211,34 @@ Useful shell commands:
 .schema accounts
 .stats
 .quit
+```
+
+## Using the API from Node.js
+
+```js
+import { DatabaseConnection } from "./ui/database_connection.js"
+import { decodeResult } from "./ui/result.js"
+
+const connection = new DatabaseConnection("127.0.0.1", 7432)
+
+await connection.connect()
+
+const bytes = await connection.query(
+  "SELECT id, balance FROM accounts ORDER BY id;"
+)
+
+const result = decodeResult(new Uint8Array(bytes))
+
+console.log(result.columns)
+console.log(result.rows)
+
+connection.close()
+```
+
+Start the database server before running the script:
+
+```bash
+./build/mydb name.db --server 127.0.0.1:7432
 ```
 
 ## Tests

@@ -1,63 +1,22 @@
-import { PAGE_HEADER_SIZE, PAGE_SIZE, PageType } from "../constants.js"
-import { ConstraintError, CorruptionError } from "../errors.js"
-import { decodeCatalog, encodeCatalog } from "./codec.js"
+import { ConstraintError } from "../errors.js"
+import { CatalogStore } from "./catalog_store.js"
 
 export class Catalog {
-  constructor(bufferPool, tables = [], pageIds = []) {
-    this.bufferPool = bufferPool
+  constructor(store, tables = []) {
+    this.store = store
+    this.bufferPool = store.bufferPool
     this.tables = new Map(tables.map(table => [table.schema.name, table]))
     this.nextId = tables.reduce((maximum, table) => table.id > maximum ? table.id : maximum, 0n) + 1n
     this.dirty = false
-    this.pageIds = pageIds
   }
 
   static load(bufferPool, rootPageId) {
-    if (!rootPageId) {
-      return new Catalog(bufferPool)
-    }
-    const page = bufferPool.get(rootPageId)
-    if (page.view.getUint16(14, true) & 1) {
-      return Catalog.loadChain(bufferPool, page)
-    }
-    try {
-      const length = page.view.getUint32(PAGE_HEADER_SIZE, true)
-      if (length > page.freeEnd - PAGE_HEADER_SIZE - 4) {
-        throw new CorruptionError("Catalog exceeds page boundary")
-      }
-      return new Catalog(bufferPool, decodeCatalog(page.bytes.subarray(PAGE_HEADER_SIZE + 4, PAGE_HEADER_SIZE + 4 + length)), [rootPageId])
-    } finally {
-      bufferPool.unpin(page)
-    }
+    const loaded = CatalogStore.load(bufferPool, rootPageId)
+    return new Catalog(loaded.store, loaded.tables)
   }
 
-  static loadChain(bufferPool, firstPage) {
-    const chunks = []
-    const pageIds = []
-    const visited = new Set()
-    let page = firstPage
-    while (page) {
-      if (visited.has(page.id)) {
-        throw new CorruptionError("Catalog page cycle")
-      }
-      visited.add(page.id)
-      pageIds[pageIds.length] = page.id
-      const length = page.view.getUint32(PAGE_HEADER_SIZE + 4, true)
-      if (length > PAGE_SIZE - PAGE_HEADER_SIZE - 8) {
-        throw new CorruptionError("Catalog chunk exceeds page boundary")
-      }
-      chunks[chunks.length] = new Uint8Array(page.bytes.subarray(PAGE_HEADER_SIZE + 8, PAGE_HEADER_SIZE + 8 + length))
-      const next = page.view.getUint32(PAGE_HEADER_SIZE, true)
-      bufferPool.unpin(page)
-      page = next === 0xffffffff ? null : bufferPool.get(next)
-    }
-    const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-    const bytes = new Uint8Array(length)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.length
-    }
-    return new Catalog(bufferPool, decodeCatalog(bytes), pageIds)
+  get pageIds() {
+    return this.store.pageIds
   }
 
   createTable(schema) {
@@ -88,10 +47,8 @@ export class Catalog {
   addIndex(tableName, definition) {
     const table = this.getTable(tableName)
     for (const candidate of this.tables.values()) {
-      for (let index = 0; index < candidate.indexes.length; index += 1) {
-        if (candidate.indexes[index].name === definition.name) {
-          throw new ConstraintError(`Index ${definition.name} already exists`)
-        }
+      if (candidate.indexes.some(index => index.name === definition.name)) {
+        throw new ConstraintError(`Index ${definition.name} already exists`)
       }
     }
     for (const column of definition.columns) {
@@ -117,28 +74,7 @@ export class Catalog {
     if (!this.dirty && this.bufferPool.pager.header.catalogRoot) {
       return false
     }
-    const bytes = encodeCatalog([...this.tables.values()])
-    const capacity = PAGE_SIZE - PAGE_HEADER_SIZE - 8
-    const required = Math.max(1, Math.ceil(bytes.length / capacity))
-    while (this.pageIds.length < required) {
-      const page = this.bufferPool.allocate(PageType.CATALOG)
-      this.pageIds[this.pageIds.length] = page.id
-      this.bufferPool.unpin(page)
-    }
-    for (let index = 0; index < required; index += 1) {
-      const page = this.bufferPool.get(this.pageIds[index])
-      const chunk = bytes.subarray(index * capacity, Math.min(bytes.length, (index + 1) * capacity))
-      page.view.setUint16(14, 1, true)
-      page.view.setUint32(PAGE_HEADER_SIZE, index + 1 < required ? this.pageIds[index + 1] : 0xffffffff, true)
-      page.view.setUint32(PAGE_HEADER_SIZE + 4, chunk.length, true)
-      page.bytes.fill(0, PAGE_HEADER_SIZE + 8)
-      page.bytes.set(chunk, PAGE_HEADER_SIZE + 8)
-      this.bufferPool.unpin(page, true)
-    }
-    const newRoot = !this.bufferPool.pager.header.catalogRoot
-    if (newRoot) {
-      this.bufferPool.pager.header.catalogRoot = this.pageIds[0]
-    }
+    const newRoot = this.store.persist([...this.tables.values()])
     this.dirty = false
     return newRoot
   }

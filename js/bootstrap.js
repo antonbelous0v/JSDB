@@ -3,6 +3,7 @@ import { runShell } from "./cli/shell.js"
 import { formatRows } from "./cli/format.js"
 import { inspectPage } from "./cli/inspect_page.js"
 import { inspectWal } from "./cli/inspect_wal.js"
+import { runDatabaseServer } from "./server/database_server.js"
 
 const argumentsList = Host.process.argv.slice(1)
 const command = argumentsList[0]
@@ -21,7 +22,10 @@ if (command === "inspect-page") {
   const database = Database.open(path)
 
   try {
-    if (argumentsList.includes("--shell")) {
+    const serverIndex = argumentsList.indexOf("--server")
+    if (serverIndex >= 0) {
+      runDatabaseServer(database, argumentsList[serverIndex + 1])
+    } else if (argumentsList.includes("--shell")) {
       runShell(database)
     }
   } finally {
