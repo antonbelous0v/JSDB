@@ -56,6 +56,63 @@ export function evaluateRow(expression, row) {
   throw new SqlError(`Cannot evaluate ${expression.type}`)
 }
 
+export function compileRowExpression(expression) {
+  if (expression.type === "binary" && (expression.operator === "AND" || expression.operator === "OR")) {
+    const left = compileRowExpression(expression.left)
+    const right = compileRowExpression(expression.right)
+    return expression.operator === "AND"
+      ? row => sqlBoolean(left(row)) && sqlBoolean(right(row))
+      : row => sqlBoolean(left(row)) || sqlBoolean(right(row))
+  }
+  if (expression.type === "binary") {
+    const column = expression.left.type === "column" && expression.right.type === "literal"
+      ? expression.left
+      : expression.right.type === "column" && expression.left.type === "literal" ? expression.right : null
+    const literal = expression.left.type === "literal"
+      ? expression.left.value
+      : expression.right.type === "literal" ? expression.right.value : undefined
+    if (column && literal !== undefined) {
+      const index = column.binding.index
+      const operator = expression.left === column ? expression.operator : reverseOperator(expression.operator)
+      if (operator === "=") {
+        return row => row[index] !== null && row[index] === literal
+      }
+      if (operator === "!=") {
+        return row => row[index] !== null && row[index] !== literal
+      }
+      if (operator === "<") {
+        return row => row[index] !== null && row[index] < literal
+      }
+      if (operator === "<=") {
+        return row => row[index] !== null && row[index] <= literal
+      }
+      if (operator === ">") {
+        return row => row[index] !== null && row[index] > literal
+      }
+      if (operator === ">=") {
+        return row => row[index] !== null && row[index] >= literal
+      }
+    }
+  }
+  return row => evaluateRow(expression, row)
+}
+
+function reverseOperator(operator) {
+  if (operator === "<") {
+    return ">"
+  }
+  if (operator === "<=") {
+    return ">="
+  }
+  if (operator === ">") {
+    return "<"
+  }
+  if (operator === ">=") {
+    return "<="
+  }
+  return operator
+}
+
 function binary(operator, left, right) {
   if (operator === "AND") {
     return sqlBoolean(left) && sqlBoolean(right)

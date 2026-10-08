@@ -8,7 +8,8 @@ export class Heap {
   }
 
   insert(bytes) {
-    for (const pageId of this.pageIds) {
+    for (let index = this.pageIds.length - 1; index >= 0; index -= 1) {
+      const pageId = this.pageIds[index]
       const page = this.bufferPool.get(pageId)
       const slots = new SlottedPage(page)
       const slotId = slots.insert(bytes)

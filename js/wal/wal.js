@@ -1,6 +1,8 @@
 import { WalRecord, WAL_HEADER_SIZE } from "./record.js"
 import { CorruptionError } from "../errors.js"
 
+const BUFFERED_READ_LIMIT = 16 * 1024 * 1024
+
 export class WriteAheadLog {
   constructor(host, path, fd, offset, nextLSN) {
     this.host = host
@@ -19,7 +21,10 @@ export class WriteAheadLog {
     let nextLSN = 1n
     if (size) {
       const records = [...WriteAheadLog.readAll(host, fd, size)]
-      const validSize = records.reduce((total, record) => total + record.encode().length, 0)
+      let validSize = 0
+      for (let index = 0; index < records.length; index += 1) {
+        validSize += WAL_HEADER_SIZE + records[index].payload.length
+      }
       if (validSize < size) {
         host.fs.truncate(fd, validSize)
         size = validSize
@@ -57,16 +62,37 @@ export class WriteAheadLog {
   }
 
   static* readAll(host, fd, size) {
+    if (size <= BUFFERED_READ_LIMIT) {
+      const bytes = new Uint8Array(size)
+      if (host.fs.pread(fd, bytes, 0, size, 0) !== size) {
+        throw new CorruptionError("Cannot read WAL")
+      }
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      let offset = 0
+      while (offset < size) {
+        if (size - offset < WAL_HEADER_SIZE) {
+          return
+        }
+        const length = view.getUint32(offset + 4, true)
+        if (length < WAL_HEADER_SIZE || offset + length > size) {
+          return
+        }
+        yield WalRecord.decode(bytes.subarray(offset, offset + length))
+        offset += length
+      }
+      return
+    }
     let offset = 0
+    const header = new Uint8Array(WAL_HEADER_SIZE)
+    const view = new DataView(header.buffer)
     while (offset < size) {
       if (size - offset < WAL_HEADER_SIZE) {
         return
       }
-      const header = new Uint8Array(WAL_HEADER_SIZE)
       if (host.fs.pread(fd, header, 0, header.length, offset) !== header.length) {
         throw new CorruptionError("Cannot read WAL header")
       }
-      const length = new DataView(header.buffer).getUint32(4, true)
+      const length = view.getUint32(4, true)
       if (length < WAL_HEADER_SIZE || offset + length > size) {
         return
       }

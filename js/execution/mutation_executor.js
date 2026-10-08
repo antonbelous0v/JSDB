@@ -1,4 +1,4 @@
-import { evaluate, evaluateRow } from "../executor/expression.js"
+import { compileRowExpression, evaluate, evaluateRow } from "../executor/expression.js"
 import { DataType } from "../constants.js"
 
 function convert(value, type) {
@@ -69,7 +69,7 @@ export class MutationExecutor {
       const index = table.schema.indexOf(assignment.column)
       return { expression: assignment.value, index, type: table.schema.columns[index].type }
     })
-    const predicate = row => !statement.where || evaluateRow(statement.where, row) === true
+    const predicate = statement.where ? compileRowExpression(statement.where) : () => true
     const update = (row) => {
       for (let index = 0; index < assignments.length; index += 1) {
         const assignment = assignments[index]
@@ -86,7 +86,7 @@ export class MutationExecutor {
 
   delete(statement, transaction) {
     const table = this.tables.table(statement.table)
-    const predicate = row => !statement.where || evaluateRow(statement.where, row) === true
+    const predicate = statement.where ? compileRowExpression(statement.where) : () => true
     const candidates = indexedItems(table, statement.where, transaction)
     return { status: "DELETE", rows: table.deleteWhere(predicate, transaction, candidates) }
   }

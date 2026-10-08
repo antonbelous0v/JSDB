@@ -1,4 +1,4 @@
-import { evaluate, evaluateRow, sqlBoolean } from "./expression.js"
+import { compileRowExpression, evaluate, evaluateRow, sqlBoolean } from "./expression.js"
 import { SqlError } from "../errors.js"
 
 export function sequenceScan(table, reference, transaction) {
@@ -47,8 +47,9 @@ export function scanProject(table, transaction, columns, condition = null, limit
   const rows = []
   const star = columns.length === 1 && columns[0].expression.type === "star"
   const columnIndexes = star ? null : projectionIndexes(columns)
+  const predicate = condition ? compileRowExpression(condition) : null
   table.forEachRow(transaction, (source) => {
-    if (condition && !sqlBoolean(evaluateRow(condition, source))) {
+    if (predicate && !sqlBoolean(predicate(source))) {
       return true
     }
     if (star) {
@@ -71,6 +72,7 @@ export function scanAggregate(table, transaction, columns, condition = null) {
   const values = new Array(columns.length).fill(null)
   const operations = new Uint8Array(columns.length)
   const columnIndexes = new Int32Array(columns.length)
+  const predicate = condition ? compileRowExpression(condition) : null
   columnIndexes.fill(-2)
   for (let index = 0; index < columns.length; index += 1) {
     const expression = columns[index].expression
@@ -82,7 +84,7 @@ export function scanAggregate(table, transaction, columns, condition = null) {
     columnIndexes[index] = argument.type === "star" ? -1 : argument.type === "column" ? argument.binding.index : -2
   }
   table.forEachRow(transaction, (row) => {
-    if (condition && !sqlBoolean(evaluateRow(condition, row))) {
+    if (predicate && !sqlBoolean(predicate(row))) {
       return true
     }
     for (let index = 0; index < columns.length; index += 1) {
