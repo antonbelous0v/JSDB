@@ -41,13 +41,19 @@ export class Parser {
       case "SELECT":
         return this.queries.select()
       case "BEGIN":
-        return { type: "begin" }
+        if (this.tokens.match("READ")) {
+          this.tokens.expect("ONLY")
+          return { type: "begin", readOnly: true }
+        }
+        return { type: "begin", readOnly: false }
       case "COMMIT":
         return { type: "commit" }
       case "ROLLBACK":
         return { type: "rollback" }
       case "EXPLAIN":
-        return { type: "explain", statement: this.statement() }
+        return { type: "explain", analyze: this.tokens.match("ANALYZE"), statement: this.statement() }
+      case "VACUUM":
+        return { type: "vacuum", table: this.tokens.identifier() }
       default:
         throw this.tokens.error(`Unexpected token ${type}`)
     }

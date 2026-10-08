@@ -3,10 +3,12 @@ import { FixedCache } from "./sql/fixed_cache.js"
 import { Binder } from "./sql/binder.js"
 import { openDatabaseResources } from "./database_factory.js"
 import { TableRegistry } from "./table_registry.js"
+import { PreparedStatement } from "./prepared_statement.js"
 import { SchemaExecutor } from "./execution/schema_executor.js"
 import { MutationExecutor } from "./execution/mutation_executor.js"
 import { QueryExecutor } from "./execution/query_executor.js"
 import { StatementExecutor } from "./execution/statement_executor.js"
+import { MaintenanceExecutor } from "./execution/maintenance_executor.js"
 import { CommitCoordinator } from "./transaction/commit_coordinator.js"
 import { TransactionSession } from "./transaction/session.js"
 
@@ -21,7 +23,8 @@ export class Database {
     const schema = new SchemaExecutor(this.catalog, this.tableRegistry, this.queryCache)
     const mutations = new MutationExecutor(this.catalog, this.tableRegistry)
     const queries = new QueryExecutor(this.catalog, this.tableRegistry)
-    this.statements = new StatementExecutor(schema, mutations, queries)
+    const maintenance = new MaintenanceExecutor(this.tableRegistry)
+    this.statements = new StatementExecutor(schema, mutations, queries, maintenance)
     this.queriesExecuted = 0
   }
 
@@ -39,6 +42,10 @@ export class Database {
 
   table(name) {
     return this.tableRegistry.table(name)
+  }
+
+  prepare(sql) {
+    return new PreparedStatement(this, sql)
   }
 
   execute(sql, session = this.session) {
@@ -65,8 +72,8 @@ export class Database {
     return session.execute(bound, transaction => this.statements.execute(bound, transaction))
   }
 
-  begin() {
-    return this.session.begin()
+  begin(readOnly = false) {
+    return this.session.begin(readOnly)
   }
 
   commit() {

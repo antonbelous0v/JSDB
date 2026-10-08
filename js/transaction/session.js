@@ -1,4 +1,5 @@
 import { TransactionState } from "../constants.js"
+import { ValidationError } from "../errors.js"
 
 export class TransactionSession {
   constructor(transactions, commitCoordinator, queryCache, tables) {
@@ -11,7 +12,7 @@ export class TransactionSession {
 
   execute(statement, action) {
     if (statement.type === "begin") {
-      return this.begin()
+      return this.begin(statement.readOnly)
     }
     if (statement.type === "commit") {
       return this.commit()
@@ -19,8 +20,12 @@ export class TransactionSession {
     if (statement.type === "rollback") {
       return this.rollback()
     }
+    const readOnly = statement.type === "select" || statement.type === "explain"
+    if (this.current?.readOnly && !readOnly) {
+      throw new ValidationError("Write statement is not allowed in a read-only transaction")
+    }
     const owned = !this.current
-    const transaction = this.current ?? this.transactions.begin(statement.type === "select" || statement.type === "explain")
+    const transaction = this.current ?? this.transactions.begin(readOnly)
     try {
       const result = action(transaction)
       if (owned) {
@@ -36,11 +41,11 @@ export class TransactionSession {
     }
   }
 
-  begin() {
+  begin(readOnly = false) {
     if (this.current) {
       throw new Error("Transaction already active")
     }
-    this.current = this.transactions.begin()
+    this.current = this.transactions.begin(readOnly)
     return { status: "BEGIN" }
   }
 

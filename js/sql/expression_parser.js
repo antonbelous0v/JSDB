@@ -4,6 +4,7 @@ const FUNCTIONS = new Set(["COUNT", "SUM", "MIN", "MAX", "AVG"])
 export class ExpressionParser {
   constructor(tokens) {
     this.tokens = tokens
+    this.parameterCount = 0
   }
 
   parse(precedence = 0) {
@@ -36,6 +37,9 @@ export class ExpressionParser {
     }
     if (this.tokens.match("NULL")) {
       return { type: "literal", value: null }
+    }
+    if (this.tokens.match("?")) {
+      return { type: "parameter", index: this.parameterCount++, value: undefined }
     }
     if (this.tokens.current().type === "literal") {
       return { type: "literal", value: this.tokens.take().value }

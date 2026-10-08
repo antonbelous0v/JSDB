@@ -8,6 +8,7 @@ export class Catalog {
     this.tables = new Map(tables.map(table => [table.schema.name, table]))
     this.nextId = tables.reduce((maximum, table) => table.id > maximum ? table.id : maximum, 0n) + 1n
     this.dirty = false
+    this.revision = 0
   }
 
   static load(bufferPool, rootPageId) {
@@ -26,6 +27,7 @@ export class Catalog {
     const table = { id: this.nextId++, schema, pageIds: [], indexes: [] }
     this.tables.set(schema.name, table)
     this.dirty = true
+    this.revision += 1
     return table
   }
 
@@ -34,6 +36,7 @@ export class Catalog {
       throw new ConstraintError(`Table ${name} does not exist`)
     }
     this.dirty = true
+    this.revision += 1
   }
 
   getTable(name) {
@@ -56,6 +59,7 @@ export class Catalog {
     }
     table.indexes[table.indexes.length] = { name: definition.name, columns: [...definition.columns], unique: Boolean(definition.unique) }
     this.dirty = true
+    this.revision += 1
   }
 
   dropIndex(name) {
@@ -64,6 +68,7 @@ export class Catalog {
       if (index >= 0) {
         table.indexes.splice(index, 1)
         this.dirty = true
+        this.revision += 1
         return
       }
     }

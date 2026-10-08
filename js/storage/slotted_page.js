@@ -29,17 +29,27 @@ export class SlottedPage {
     if (!(bytes instanceof Uint8Array) || bytes.length > 0xffff) {
       throw new ValidationError("Invalid tuple")
     }
-    if (this.freeSpace < bytes.length + SLOT_SIZE) {
+    let slotId = this.slotCount
+    for (let index = 0; index < slotId; index += 1) {
+      if (this.slot(index).length === 0) {
+        slotId = index
+        break
+      }
+    }
+    const reused = slotId < this.slotCount
+    if (this.freeSpace < bytes.length + (reused ? 0 : SLOT_SIZE)) {
       return -1
     }
-    const slotId = this.slotCount
     const tupleOffset = this.page.freeStart
     this.page.bytes.set(bytes, tupleOffset)
     this.page.freeStart = tupleOffset + bytes.length
-    this.page.freeEnd -= SLOT_SIZE
-    this.view.setUint16(this.page.freeEnd, tupleOffset, true)
-    this.view.setUint16(this.page.freeEnd + 2, bytes.length, true)
-    this.view.setUint16(SLOT_COUNT_OFFSET, slotId + 1, true)
+    if (!reused) {
+      this.page.freeEnd -= SLOT_SIZE
+      this.view.setUint16(SLOT_COUNT_OFFSET, slotId + 1, true)
+    }
+    const slotOffset = this.slotOffset(slotId)
+    this.view.setUint16(slotOffset, tupleOffset, true)
+    this.view.setUint16(slotOffset + 2, bytes.length, true)
     this.page.dirty = true
     return slotId
   }
@@ -60,6 +70,23 @@ export class SlottedPage {
     this.view.setUint16(slotOffset + 2, 0, true)
     this.page.dirty = true
     return true
+  }
+
+  compact() {
+    let cursor = PAGE_HEADER_SIZE
+    for (let slotId = 0; slotId < this.slotCount; slotId += 1) {
+      const slot = this.slot(slotId)
+      if (!slot.length) {
+        continue
+      }
+      if (slot.offset !== cursor) {
+        this.page.bytes.copyWithin(cursor, slot.offset, slot.offset + slot.length)
+        this.view.setUint16(this.slotOffset(slotId), cursor, true)
+      }
+      cursor += slot.length
+    }
+    this.page.freeStart = cursor
+    this.page.dirty = true
   }
 
   forEach(action) {

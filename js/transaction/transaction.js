@@ -1,4 +1,5 @@
 import { TransactionState, WalType } from "../constants.js"
+import { WriteConflictError } from "../errors.js"
 
 export class Transaction {
   constructor(id, snapshot, startLSN, readOnly) {
@@ -24,9 +25,13 @@ export class TransactionManager {
     this.states = new Map()
     this.committed = 0
     this.aborted = 0
+    this.writer = null
   }
 
   begin(readOnly = false) {
+    if (!readOnly && this.writer) {
+      throw new WriteConflictError("Another write transaction is active")
+    }
     const id = this.nextId++
     const active = new Set()
     let xmin = id
@@ -44,6 +49,9 @@ export class TransactionManager {
     const transaction = new Transaction(id, snapshot, startLSN, readOnly)
     this.transactions.set(id, transaction)
     this.states.set(id, TransactionState.ACTIVE)
+    if (!readOnly) {
+      this.writer = transaction
+    }
     return transaction
   }
 
@@ -56,6 +64,9 @@ export class TransactionManager {
     transaction.state = TransactionState.COMMITTED
     this.states.set(transaction.id, transaction.state)
     this.transactions.delete(transaction.id)
+    if (this.writer === transaction) {
+      this.writer = null
+    }
     if (transaction.readOnly) {
       this.states.delete(transaction.id)
     }
@@ -74,6 +85,9 @@ export class TransactionManager {
     transaction.state = TransactionState.ABORTED
     this.states.set(transaction.id, transaction.state)
     this.transactions.delete(transaction.id)
+    if (this.writer === transaction) {
+      this.writer = null
+    }
     this.locks.release(transaction.id)
     this.aborted += 1
   }

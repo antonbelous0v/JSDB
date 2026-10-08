@@ -18,12 +18,14 @@ function indexedItems(table, condition, transaction) {
   if (!condition || condition.type !== "binary" || condition.operator !== "=") {
     return null
   }
-  const column = condition.left.type === "column" && condition.right.type === "literal"
+  const rightValue = condition.right.type === "literal" || condition.right.type === "parameter"
+  const leftValue = condition.left.type === "literal" || condition.left.type === "parameter"
+  const column = condition.left.type === "column" && rightValue
     ? condition.left
-    : condition.right.type === "column" && condition.left.type === "literal" ? condition.right : null
-  const literal = condition.left.type === "literal"
+    : condition.right.type === "column" && leftValue ? condition.right : null
+  const literal = leftValue
     ? condition.left
-    : condition.right.type === "literal" ? condition.right : null
+    : rightValue ? condition.right : null
   if (!column || !literal) {
     return null
   }

@@ -1,8 +1,9 @@
 export class StatementExecutor {
-  constructor(schema, mutations, queries) {
+  constructor(schema, mutations, queries, maintenance) {
     this.schema = schema
     this.mutations = mutations
     this.queries = queries
+    this.maintenance = maintenance
   }
 
   execute(statement, transaction) {
@@ -24,7 +25,9 @@ export class StatementExecutor {
       case "select":
         return this.queries.select(statement, transaction)
       case "explain":
-        return this.queries.explain(statement.statement)
+        return this.queries.explain(statement.statement, transaction, statement.analyze)
+      case "vacuum":
+        return this.maintenance.vacuum(statement, transaction)
       default:
         throw new Error(`Unsupported statement ${statement.type}`)
     }

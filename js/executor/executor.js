@@ -9,7 +9,16 @@ export class Executor {
     this.transaction = transaction
   }
 
-  execute(plan) {
+  execute(plan, observer = null) {
+    const start = observer ? performance.now() : 0
+    const rows = this.executePlan(plan, observer)
+    if (observer) {
+      observer(plan, rows.length, performance.now() - start)
+    }
+    return rows
+  }
+
+  executePlan(plan, observer) {
     if (plan.kind === "SeqScan") {
       return sequenceScan(this.resolveTable(plan.reference.name), plan.reference, this.transaction)
     }
@@ -20,23 +29,23 @@ export class Executor {
       return indexScanProject(this.resolveTable(plan.reference.name), plan.index, plan.key, this.transaction, plan.columns)
     }
     if (plan.kind === "Filter") {
-      return filter(this.execute(plan.input), plan.condition)
+      return filter(this.execute(plan.input, observer), plan.condition)
     }
     if (plan.kind === "Project") {
-      return project(this.execute(plan.input), plan.columns)
+      return project(this.execute(plan.input, observer), plan.columns)
     }
     if (plan.kind === "Aggregate") {
-      return aggregate(this.execute(plan.input), plan.columns)
+      return aggregate(this.execute(plan.input, observer), plan.columns)
     }
     if (plan.kind === "NestedLoopJoin") {
-      return nestedLoopJoin(this.execute(plan.left), () => this.execute(plan.right), plan.condition)
+      return nestedLoopJoin(this.execute(plan.left, observer), () => this.execute(plan.right, observer), plan.condition)
     }
     if (plan.kind === "Sort") {
-      return sort(this.execute(plan.input), plan.orderBy)
+      return sort(this.execute(plan.input, observer), plan.orderBy)
     }
     if (plan.kind === "Limit") {
       const count = Number(evaluate(plan.limit, {}))
-      return limit(this.execute(plan.input), count)
+      return limit(this.execute(plan.input, observer), count)
     }
     if (plan.kind === "LimitedSeqScanProject") {
       const count = Number(evaluate(plan.limit, {}))

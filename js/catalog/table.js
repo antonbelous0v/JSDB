@@ -1,6 +1,7 @@
 import { Heap } from "../storage/heap.js"
 import { TupleCodec } from "../storage/tuple_codec.js"
 import { TransactionState, WalType } from "../constants.js"
+import { isVisible } from "../transaction/snapshot.js"
 import { RowVersions } from "./row_versions.js"
 import { TableIndexes } from "./table_indexes.js"
 import { TableConstraints } from "./table_constraints.js"
@@ -126,6 +127,48 @@ export class Table {
 
   lookup(indexName, key, transaction) {
     return this.indexManager.lookup(indexName, key, transaction, this.versions)
+  }
+
+  vacuum(transaction) {
+    this.transactions.requireActive(transaction)
+    const pages = new Map()
+    this.versions.forEachVersion((rid, version) => {
+      const insertedAborted = this.transactions.states.get(version.xmin) === TransactionState.ABORTED
+      const deletedCommitted = version.xmax !== 0n && this.transactions.states.get(version.xmax) === TransactionState.COMMITTED
+      if (!insertedAborted && !deletedCommitted) {
+        return
+      }
+      for (const active of this.transactions.transactions.values()) {
+        if (active !== transaction && isVisible(version, active.snapshot, active.id, this.transactions.states)) {
+          return
+        }
+      }
+      let entries = pages.get(rid.pageId)
+      if (!entries) {
+        entries = []
+        pages.set(rid.pageId, entries)
+      }
+      entries[entries.length] = { rid, version }
+    })
+    let count = 0
+    for (const [pageId, entries] of pages) {
+      const slots = new Array(entries.length)
+      for (let index = 0; index < entries.length; index += 1) {
+        slots[index] = entries[index].rid.slotId
+      }
+      const before = this.heap.vacuumPage(pageId, slots)
+      for (let index = 0; index < entries.length; index += 1) {
+        this.versions.remove(entries[index].rid)
+      }
+      transaction.addUndo(() => {
+        this.heap.restorePage(pageId, before)
+        for (let index = 0; index < entries.length; index += 1) {
+          this.versions.set(entries[index].rid, entries[index].version)
+        }
+      })
+      count += entries.length
+    }
+    return count
   }
 
   setPageLSN(pageId, lsn) {

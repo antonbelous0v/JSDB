@@ -14,6 +14,17 @@ export class FixedList {
     this.length += 1
   }
 
+  grow(capacity) {
+    if (!Number.isSafeInteger(capacity) || capacity <= this.values.length) {
+      throw new ValidationError("Fixed list growth must increase capacity")
+    }
+    const values = new Array(capacity)
+    for (let index = 0; index < this.length; index += 1) {
+      values[index] = this.values[index]
+    }
+    this.values = values
+  }
+
   removeAt(index) {
     if (index < 0 || index >= this.length) {
       throw new ValidationError("Fixed list index is out of range")

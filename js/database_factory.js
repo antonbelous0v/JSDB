@@ -30,7 +30,7 @@ export function openDatabaseResources(path, host) {
     }).run(pager.header.checkpointLSN)
     pager.sync()
     pager.reloadHeader()
-    const bufferPool = new BufferPool(pager, 128, lsn => wal.sync(lsn))
+    const bufferPool = new BufferPool(pager, 128, lsn => wal.sync(lsn), true)
     const transactions = new TransactionManager(wal, new LockTable())
     transactions.restore(wal.records())
     const catalog = Catalog.load(bufferPool, pager.header.catalogRoot)

@@ -44,6 +44,27 @@ export class Heap {
     }
   }
 
+  vacuumPage(pageId, slotIds) {
+    const page = this.bufferPool.get(pageId)
+    const before = new Uint8Array(page.bytes)
+    try {
+      const slots = new SlottedPage(page)
+      for (let index = 0; index < slotIds.length; index += 1) {
+        slots.remove(slotIds[index])
+      }
+      slots.compact()
+      return before
+    } finally {
+      this.bufferPool.unpin(page, true)
+    }
+  }
+
+  restorePage(pageId, bytes) {
+    const page = this.bufferPool.get(pageId)
+    page.bytes.set(bytes)
+    this.bufferPool.unpin(page, true)
+  }
+
   update(rid, bytes) {
     const page = this.bufferPool.get(rid.pageId)
     try {

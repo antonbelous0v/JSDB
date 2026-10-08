@@ -38,6 +38,13 @@ measure("indexed reads in tx", count, () => {
   database.execute("COMMIT")
 })
 
+const preparedRead = database.prepare("SELECT value FROM records WHERE id = ?")
+measure("prepared point read", count, () => {
+  for (let index = 0; index < count; index += 1) {
+    preparedRead.execute([BigInt(index)])
+  }
+})
+
 measure("sequential predicate", 100, () => {
   for (let index = 0; index < 100; index += 1) {
     database.execute(`SELECT id FROM records WHERE category = ${index % 20}`)

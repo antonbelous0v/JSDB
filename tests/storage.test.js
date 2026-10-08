@@ -64,6 +64,26 @@ test("buffer pool evicts unpinned dirty pages", () => {
   fs.rmSync(directory, { recursive: true })
 })
 
+test("no-steal buffer pool retains dirty pages beyond capacity", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mydb-no-steal-"))
+  const file = path.join(directory, "data.db")
+  const pager = Pager.open(createHost(), file)
+  const pool = new BufferPool(pager, 2, () => {}, true)
+  const first = pool.allocate(PageType.HEAP)
+  first.bytes[100] = 91
+  pool.unpin(first, true)
+  const second = pool.allocate(PageType.HEAP)
+  pool.unpin(second)
+  const third = pool.allocate(PageType.HEAP)
+  pool.unpin(third)
+  assert.equal(pool.frames.size, 3)
+  assert.notEqual(pager.read(first.id).bytes[100], 91)
+  pool.flushAll()
+  assert.equal(pager.read(first.id).bytes[100], 91)
+  pager.close()
+  fs.rmSync(directory, { recursive: true })
+})
+
 test("allocated pages reach disk before the header references them", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mydb-allocation-"))
   const file = path.join(directory, "data.db")

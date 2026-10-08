@@ -27,23 +27,26 @@ It is not trying to beat PostgreSQL or SQLite. I just wanted to build the intere
 - Fixed-size 8 KiB pages
 - Checksummed database pages and WAL records
 - Slotted heap pages and row identifiers
-- Clock-based buffer pool
+- Clock-based no-steal buffer pool
 - Binary tuple and catalog formats
 - B+Tree primary and secondary indexes
 - Write-ahead log with LSNs and durable commits
 - Transactions with commit and rollback
 - MVCC tuple versions and snapshot visibility
-- First-writer-wins conflict detection
+- One-writer, many-reader transaction isolation
 - Checkpoints and WAL recovery primitives
 - `PRIMARY KEY`, `UNIQUE`, `NOT NULL`, and `FOREIGN KEY`
 - `CREATE TABLE`, `DROP TABLE`, `CREATE INDEX`, and `DROP INDEX`
 - `INSERT`, `UPDATE`, `DELETE`, and `SELECT`
-- `BEGIN`, `COMMIT`, and `ROLLBACK`
+- `BEGIN`, `BEGIN READ ONLY`, `COMMIT`, and `ROLLBACK`
+- MVCC-safe `VACUUM table_name` with heap compaction and slot reuse
 - Inner joins, filtering, ordering, and limits
 - `COUNT`, `SUM`, `MIN`, `MAX`, and `AVG`
 - SQL lexer, parser, binder, logical planner, physical planner, and executor
 - Sequential scans and index scans
 - `EXPLAIN`
+- `EXPLAIN ANALYZE` with actual row counts and operator timings
+- Prepared statements with positional parameters
 - Interactive shell, metrics, page inspection, and WAL inspection
 - Multi-client TCP server with isolated transaction sessions
 - Versioned binary protocol with typed row metadata
@@ -261,20 +264,21 @@ The suite used 2,000 rows unless another count is shown:
 | --- | ---: |
 | B+Tree insert, 100,000 entries | 3,956,003 ops/s |
 | B+Tree lookup, 100,000 entries | 3,802,974 ops/s |
-| Bulk insert in one transaction | 17,851 ops/s |
-| Indexed point read | 126,521 ops/s |
-| Indexed point reads in one transaction | 170,814 ops/s |
-| Sequential predicate scan | 6,289 ops/s |
-| Bounded range query | 34,162 ops/s |
-| Aggregate scan | 3,334 ops/s |
-| Transactional update | 5,818 ops/s |
-| Autocommit write | 172 commits/s |
-| Commit latency p50 | 5.981 ms |
-| Commit latency p95 | 7.105 ms |
-| Commit latency p99 | 10.542 ms |
-| Checkpoint | 6.314 ms |
-| Reopen database | 30.413 ms |
-| First indexed read after reopen | 5.686 ms |
+| Bulk insert in one transaction | 15,267 ops/s |
+| Indexed point read | 115,990 ops/s |
+| Indexed point reads in one transaction | 155,811 ops/s |
+| Prepared indexed point read | 472,864 ops/s |
+| Sequential predicate scan | 6,158 ops/s |
+| Bounded range query | 31,416 ops/s |
+| Aggregate scan | 3,144 ops/s |
+| Transactional update | 6,184 ops/s |
+| Autocommit write | 184 commits/s |
+| Commit latency p50 | 5.511 ms |
+| Commit latency p95 | 6.971 ms |
+| Commit latency p99 | 8.527 ms |
+| Checkpoint | 5.614 ms |
+| Reopen database | 24.213 ms |
+| First indexed read after reopen | 6.036 ms |
 
 Read-only queries do not write to the WAL or call `fsync`. Keeping a batch inside one explicit transaction is still faster because it also avoids setting up a new snapshot for every query.
 
@@ -284,6 +288,13 @@ Run the benchmarks with:
 npm run benchmark:btree -- 100000
 npm run benchmark:database -- 2000
 npm run benchmark:suite -- 2000
+```
+
+Prepared statements parse and bind SQL once while keeping values separate from the query text:
+
+```js
+const statement = database.prepare("SELECT balance FROM accounts WHERE id = ?")
+const rows = statement.execute([1n])
 ```
 
 So yeah. JavaScript in a database today, JavaScript in a kettle tomorrow ❤️

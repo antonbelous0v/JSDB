@@ -4,6 +4,9 @@ export function evaluate(expression, context) {
   if (expression.type === "literal") {
     return expression.value
   }
+  if (expression.type === "parameter") {
+    return expression.value
+  }
   if (expression.type === "column") {
     return context[expression.binding.table][expression.binding.index]
   }
@@ -30,6 +33,9 @@ export function evaluate(expression, context) {
 
 export function evaluateRow(expression, row) {
   if (expression.type === "literal") {
+    return expression.value
+  }
+  if (expression.type === "parameter") {
     return expression.value
   }
   if (expression.type === "column") {

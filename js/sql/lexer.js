@@ -1,6 +1,6 @@
 import { SqlError } from "../errors.js"
 
-const KEYWORDS = new Set("CREATE TABLE DROP INDEX UNIQUE INSERT INTO VALUES UPDATE SET DELETE FROM SELECT WHERE ORDER BY ASC DESC LIMIT BEGIN COMMIT ROLLBACK EXPLAIN INNER JOIN ON AS AND OR NOT IS NULL PRIMARY KEY REFERENCES BOOLEAN INT INTEGER BIGINT FLOAT REAL TEXT TIMESTAMP COUNT SUM MIN MAX AVG GROUP".split(" "))
+const KEYWORDS = new Set("CREATE TABLE DROP INDEX UNIQUE INSERT INTO VALUES UPDATE SET DELETE FROM SELECT WHERE ORDER BY ASC DESC LIMIT BEGIN COMMIT ROLLBACK EXPLAIN ANALYZE VACUUM READ ONLY INNER JOIN ON AS AND OR NOT IS NULL PRIMARY KEY REFERENCES BOOLEAN INT INTEGER BIGINT FLOAT REAL TEXT TIMESTAMP COUNT SUM MIN MAX AVG GROUP".split(" "))
 
 export class Lexer {
   constructor(sql) {
@@ -37,7 +37,7 @@ export class Lexer {
         tokens[count++] = { type: "operator", value: pair === "<>" ? "!=" : pair, position: start }
         continue
       }
-      if ("(),;.*+-/=<>".includes(char)) {
+      if ("(),;.*+-/=<>?".includes(char)) {
         this.position += 1
         tokens[count++] = { type: "symbol", value: char, position: start }
         continue
