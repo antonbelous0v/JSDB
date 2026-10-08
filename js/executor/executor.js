@@ -1,7 +1,7 @@
 import { aggregate } from "./aggregate.js"
 import { evaluate } from "./expression.js"
 import { filter, limit, nestedLoopJoin, project, sort } from "./operators.js"
-import { indexScan, limitedSequenceScan, sequenceScan } from "./scans.js"
+import { indexScan, indexScanProject, limitedSequenceScan, scanAggregate, scanProject, sequenceScan } from "./scans.js"
 
 export class Executor {
   constructor(resolveTable, transaction) {
@@ -15,6 +15,9 @@ export class Executor {
     }
     if (plan.kind === "IndexScan") {
       return indexScan(this.resolveTable(plan.reference.name), plan.reference, plan.index, plan.key, this.transaction)
+    }
+    if (plan.kind === "IndexScanProject") {
+      return indexScanProject(this.resolveTable(plan.reference.name), plan.index, plan.key, this.transaction, plan.columns)
     }
     if (plan.kind === "Filter") {
       return filter(this.execute(plan.input), plan.condition)
@@ -39,6 +42,13 @@ export class Executor {
       const count = Number(evaluate(plan.limit, {}))
       const rows = limitedSequenceScan(this.resolveTable(plan.reference.name), plan.reference, this.transaction, plan.condition, count)
       return project(rows, plan.columns)
+    }
+    if (plan.kind === "SeqScanProject") {
+      const count = plan.limit ? Number(evaluate(plan.limit, {})) : Infinity
+      return scanProject(this.resolveTable(plan.reference.name), this.transaction, plan.columns, plan.condition, count)
+    }
+    if (plan.kind === "SeqScanAggregate") {
+      return scanAggregate(this.resolveTable(plan.reference.name), this.transaction, plan.columns, plan.condition)
     }
     throw new Error(`Unknown physical operator ${plan.kind}`)
   }

@@ -44,4 +44,20 @@ export class RowVersions {
     }
     return true
   }
+
+  forEachRow(transaction, action) {
+    for (let pageId = 0; pageId < this.pages.length; pageId += 1) {
+      const page = this.pages[pageId]
+      if (!page) {
+        continue
+      }
+      for (let slotId = 0; slotId < page.length; slotId += 1) {
+        const version = page[slotId]
+        if (version && isVisible(version, transaction.snapshot, transaction.id, this.transactionStates) && action(version.row) === false) {
+          return false
+        }
+      }
+    }
+    return true
+  }
 }

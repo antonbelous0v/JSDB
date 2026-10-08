@@ -66,7 +66,7 @@ export class Lexer {
     while (this.position < this.sql.length && isDigit(this.sql.charCodeAt(this.position))) {
       this.position += 1
     }
-    if (this.sql[this.position] === ".") {
+    if (this.position < this.sql.length && this.sql[this.position] === ".") {
       this.position += 1
       while (this.position < this.sql.length && isDigit(this.sql.charCodeAt(this.position))) {
         this.position += 1
@@ -83,7 +83,7 @@ export class Lexer {
     while (this.position < this.sql.length) {
       const char = this.sql[this.position++]
       if (char === quote) {
-        if (this.sql[this.position] === quote) {
+        if (this.position < this.sql.length && this.sql[this.position] === quote) {
           value += quote
           this.position += 1
           continue

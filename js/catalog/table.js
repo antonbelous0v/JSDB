@@ -34,8 +34,17 @@ export class Table {
   }
 
   insert(input, transaction) {
-    this.transactions.requireActive(transaction)
     const row = this.schema.normalize(input)
+    return this.insertValidatedRow(row, transaction)
+  }
+
+  insertRow(row, transaction) {
+    this.schema.validateRow(row)
+    return this.insertValidatedRow(row, transaction)
+  }
+
+  insertValidatedRow(row, transaction) {
+    this.transactions.requireActive(transaction)
     this.constraints.validateInsert(row, transaction)
     const bytes = TupleCodec.encode(this.schema, row, transaction.id)
     const rid = this.heap.insert(bytes)
@@ -51,9 +60,10 @@ export class Table {
     return rid
   }
 
-  deleteWhere(predicate, transaction) {
+  deleteWhere(predicate, transaction, candidates = null) {
     let count = 0
-    for (const item of this.scan(transaction)) {
+    const rows = candidates ?? this.scan(transaction)
+    for (const item of rows) {
       if (predicate(item.row)) {
         this.deleteOne(item, transaction)
         count += 1
@@ -62,18 +72,18 @@ export class Table {
     return count
   }
 
-  updateWhere(predicate, changes, transaction) {
+  updateWhere(predicate, update, transaction, candidates = null) {
     let count = 0
-    for (const item of this.scan(transaction)) {
+    const rows = candidates ?? this.scan(transaction)
+    for (const item of rows) {
       if (!predicate(item.row)) {
         continue
       }
-      const input = Object.fromEntries(this.schema.columns.map((column, index) => [column.name, item.row[index]]))
-      for (const [name, value] of Object.entries(changes)) {
-        input[name] = typeof value === "function" ? value(input[name], input) : value
-      }
+      const row = item.row.slice()
+      update(row)
+      this.schema.validateRow(row)
       this.deleteOne(item, transaction)
-      this.insert(input, transaction)
+      this.insertValidatedRow(row, transaction)
       count += 1
     }
     return count
@@ -108,6 +118,10 @@ export class Table {
 
   forEach(transaction, action) {
     return this.versions.forEach(transaction, action)
+  }
+
+  forEachRow(transaction, action) {
+    return this.versions.forEachRow(transaction, action)
   }
 
   lookup(indexName, key, transaction) {

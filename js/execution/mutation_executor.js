@@ -1,4 +1,4 @@
-import { evaluate } from "../executor/expression.js"
+import { evaluate, evaluateRow } from "../executor/expression.js"
 import { DataType } from "../constants.js"
 
 function convert(value, type) {
@@ -14,6 +14,28 @@ function convert(value, type) {
   return value
 }
 
+function indexedItems(table, condition, transaction) {
+  if (!condition || condition.type !== "binary" || condition.operator !== "=") {
+    return null
+  }
+  const column = condition.left.type === "column" && condition.right.type === "literal"
+    ? condition.left
+    : condition.right.type === "column" && condition.left.type === "literal" ? condition.right : null
+  const literal = condition.left.type === "literal"
+    ? condition.left
+    : condition.right.type === "literal" ? condition.right : null
+  if (!column || !literal) {
+    return null
+  }
+  const name = table.schema.columns[column.binding.index].name
+  for (const { definition } of table.indexes.values()) {
+    if (definition.columns.length === 1 && definition.columns[0] === name) {
+      return table.lookup(definition.name, literal.value, transaction)
+    }
+  }
+  return null
+}
+
 export class MutationExecutor {
   constructor(catalog, tables) {
     this.catalog = catalog
@@ -22,13 +44,20 @@ export class MutationExecutor {
 
   insert(statement, transaction) {
     const table = this.tables.table(statement.table)
-    const columns = statement.columns ?? table.schema.columns.map(column => column.name)
+    const schema = table.schema
+    const columnIndexes = statement.columns
+      ? statement.columns.map(column => schema.indexOf(column))
+      : schema.columns.map((_, index) => index)
     for (const values of statement.values) {
-      const input = Object.fromEntries(columns.map((column, index) => {
-        const definition = table.schema.columns[table.schema.indexOf(column)]
-        return [column, convert(evaluate(values[index], {}), definition.type)]
-      }))
-      table.insert(input, transaction)
+      const row = new Array(schema.columns.length)
+      for (let index = 0; index < schema.columns.length; index += 1) {
+        row[index] = schema.columns[index].defaultValue
+      }
+      for (let index = 0; index < values.length; index += 1) {
+        const columnIndex = columnIndexes[index]
+        row[columnIndex] = convert(evaluate(values[index], {}), schema.columns[columnIndex].type)
+      }
+      table.insertRow(row, transaction)
     }
     this.catalog.markDirty()
     return { status: "INSERT", rows: statement.values.length }
@@ -36,13 +65,19 @@ export class MutationExecutor {
 
   update(statement, transaction) {
     const table = this.tables.table(statement.table)
-    const predicate = row => !statement.where || evaluate(statement.where, { [statement.table]: row }) === true
-    const changes = Object.fromEntries(statement.assignments.map(assignment => [assignment.column, (_, input) => {
-      const column = table.schema.columns[table.schema.indexOf(assignment.column)]
-      const row = table.schema.columns.map(definition => input[definition.name])
-      return convert(evaluate(assignment.value, { [statement.table]: row }), column.type)
-    }]))
-    const rows = table.updateWhere(predicate, changes, transaction)
+    const assignments = statement.assignments.map((assignment) => {
+      const index = table.schema.indexOf(assignment.column)
+      return { expression: assignment.value, index, type: table.schema.columns[index].type }
+    })
+    const predicate = row => !statement.where || evaluateRow(statement.where, row) === true
+    const update = (row) => {
+      for (let index = 0; index < assignments.length; index += 1) {
+        const assignment = assignments[index]
+        row[assignment.index] = convert(evaluateRow(assignment.expression, row), assignment.type)
+      }
+    }
+    const candidates = indexedItems(table, statement.where, transaction)
+    const rows = table.updateWhere(predicate, update, transaction, candidates)
     if (rows) {
       this.catalog.markDirty()
     }
@@ -51,7 +86,8 @@ export class MutationExecutor {
 
   delete(statement, transaction) {
     const table = this.tables.table(statement.table)
-    const predicate = row => !statement.where || evaluate(statement.where, { [statement.table]: row }) === true
-    return { status: "DELETE", rows: table.deleteWhere(predicate, transaction) }
+    const predicate = row => !statement.where || evaluateRow(statement.where, row) === true
+    const candidates = indexedItems(table, statement.where, transaction)
+    return { status: "DELETE", rows: table.deleteWhere(predicate, transaction, candidates) }
   }
 }

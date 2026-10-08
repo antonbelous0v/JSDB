@@ -259,22 +259,22 @@ The suite used 2,000 rows unless another count is shown:
 
 | Workload | Result |
 | --- | ---: |
-| B+Tree insert, 100,000 entries | 3,006,279 ops/s |
-| B+Tree lookup, 100,000 entries | 3,346,044 ops/s |
-| Bulk insert in one transaction | 15,831 ops/s |
-| Indexed point read | 122,986 ops/s |
-| Indexed point reads in one transaction | 176,684 ops/s |
-| Sequential predicate scan | 1,760 ops/s |
-| Bounded range query | 19,127 ops/s |
-| Aggregate scan | 1,438 ops/s |
-| Transactional update | 1,280 ops/s |
-| Autocommit write | 163 commits/s |
-| Commit latency p50 | 6.002 ms |
-| Commit latency p95 | 7.964 ms |
-| Commit latency p99 | 8.179 ms |
-| Checkpoint | 5.996 ms |
-| Reopen database | 84.165 ms |
-| First indexed read after reopen | 5.762 ms |
+| B+Tree insert, 100,000 entries | 3,956,003 ops/s |
+| B+Tree lookup, 100,000 entries | 3,802,974 ops/s |
+| Bulk insert in one transaction | 16,034 ops/s |
+| Indexed point read | 121,604 ops/s |
+| Indexed point reads in one transaction | 175,490 ops/s |
+| Sequential predicate scan | 4,292 ops/s |
+| Bounded range query | 21,637 ops/s |
+| Aggregate scan | 3,086 ops/s |
+| Transactional update | 5,620 ops/s |
+| Autocommit write | 182 commits/s |
+| Commit latency p50 | 5.871 ms |
+| Commit latency p95 | 6.990 ms |
+| Commit latency p99 | 7.083 ms |
+| Checkpoint | 5.385 ms |
+| Reopen database | 56.920 ms |
+| First indexed read after reopen | 5.441 ms |
 
 Read-only queries do not write to the WAL or call `fsync`. Keeping a batch inside one explicit transaction is still faster because it also avoids setting up a new snapshot for every query.
 

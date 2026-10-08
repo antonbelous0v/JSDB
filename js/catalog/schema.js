@@ -48,9 +48,19 @@ export class TableSchema {
   }
 
   normalize(input) {
-    const row = this.columns.map(column => Object.hasOwn(input, column.name) ? input[column.name] : column.defaultValue)
-    this.columns.forEach((column, index) => this.validate(column, row[index]))
+    const row = new Array(this.columns.length)
+    for (let index = 0; index < this.columns.length; index += 1) {
+      const column = this.columns[index]
+      row[index] = Object.hasOwn(input, column.name) ? input[column.name] : column.defaultValue
+    }
+    this.validateRow(row)
     return row
+  }
+
+  validateRow(row) {
+    for (let index = 0; index < this.columns.length; index += 1) {
+      this.validate(this.columns[index], row[index])
+    }
   }
 
   validate(column, value) {

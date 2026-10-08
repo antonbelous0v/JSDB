@@ -22,12 +22,12 @@ export function compareKeys(left, right) {
   return left < right ? -1 : 1
 }
 
-export function lowerBound(values, key, project = value => value) {
+export function lowerBound(values, key) {
   let low = 0
   let high = values.length
   while (low < high) {
     const middle = low + ((high - low) >> 1)
-    if (compareKeys(project(values[middle]), key) < 0) {
+    if (compareKeys(values[middle], key) < 0) {
       low = middle + 1
     } else {
       high = middle

@@ -14,9 +14,25 @@ export class PhysicalPlanner {
       return { kind: "NestedLoopJoin", left: this.plan(logical.left), right: this.plan(logical.right), condition: logical.condition }
     }
     if (logical.kind === "project") {
+      if (logical.input.kind === "scan") {
+        return { kind: "SeqScanProject", reference: logical.input.reference, columns: logical.columns }
+      }
+      if (logical.input.kind === "filter" && logical.input.input.kind === "scan") {
+        const indexed = this.indexCondition(logical.input.condition, logical.input.input)
+        if (indexed) {
+          return { ...indexed, kind: "IndexScanProject", columns: logical.columns }
+        }
+        return { kind: "SeqScanProject", reference: logical.input.input.reference, condition: logical.input.condition, columns: logical.columns }
+      }
       return { kind: "Project", input: this.plan(logical.input), columns: logical.columns }
     }
     if (logical.kind === "aggregate") {
+      if (logical.input.kind === "scan") {
+        return { kind: "SeqScanAggregate", reference: logical.input.reference, columns: logical.columns }
+      }
+      if (logical.input.kind === "filter" && logical.input.input.kind === "scan" && !this.indexCondition(logical.input.condition, logical.input.input)) {
+        return { kind: "SeqScanAggregate", reference: logical.input.input.reference, condition: logical.input.condition, columns: logical.columns }
+      }
       return { kind: "Aggregate", input: this.plan(logical.input), columns: logical.columns }
     }
     if (logical.kind === "sort") {
@@ -46,6 +62,9 @@ export class PhysicalPlanner {
   }
 
   limit(input, limit) {
+    if (input.kind === "SeqScanProject") {
+      return { ...input, limit }
+    }
     if (input.kind === "Project" && input.input.kind === "Filter" && input.input.input.kind === "SeqScan") {
       return { kind: "LimitedSeqScanProject", reference: input.input.input.reference, condition: input.input.condition, columns: input.columns, limit }
     }

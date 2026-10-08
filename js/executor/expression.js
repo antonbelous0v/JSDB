@@ -28,6 +28,34 @@ export function evaluate(expression, context) {
   throw new SqlError(`Cannot evaluate ${expression.type}`)
 }
 
+export function evaluateRow(expression, row) {
+  if (expression.type === "literal") {
+    return expression.value
+  }
+  if (expression.type === "column") {
+    return row[expression.binding.index]
+  }
+  if (expression.type === "unary") {
+    const value = evaluateRow(expression.operand, row)
+    if (expression.operator === "NOT") {
+      return !sqlBoolean(value)
+    }
+    if (expression.operator === "-") {
+      return -value
+    }
+    if (expression.operator === "+") {
+      return value
+    }
+  }
+  if (expression.type === "is_null") {
+    return expression.not ? evaluateRow(expression.operand, row) !== null : evaluateRow(expression.operand, row) === null
+  }
+  if (expression.type === "binary") {
+    return binary(expression.operator, evaluateRow(expression.left, row), evaluateRow(expression.right, row))
+  }
+  throw new SqlError(`Cannot evaluate ${expression.type}`)
+}
+
 function binary(operator, left, right) {
   if (operator === "AND") {
     return sqlBoolean(left) && sqlBoolean(right)
